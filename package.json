@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:preview": "VITE_GOOGLE_SCRIPT_URL=${VITE_PREVIEW_GOOGLE_SCRIPT_URL:-} npm run build",
     "lint": "oxlint",
     "preview": "vite preview",
     "preview:cloudflare": "npm run build && npx --yes wrangler@4 dev",
-    "deploy:cloudflare:preview": "npm run build && npx --yes wrangler@4 deploy --name emori-landing-page-preview",
+    "deploy:cloudflare:preview": "npm run build:preview && npx --yes wrangler@4 deploy --name emori-landing-page-preview",
     "images:webp": "node scripts/convert-to-webp.mjs"
   },
   "dependencies": {
