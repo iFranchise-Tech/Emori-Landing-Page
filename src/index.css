@@ -457,7 +457,7 @@ img {
 
 .nav__link {
   font-size: 0.68rem;
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #111111;
@@ -572,6 +572,20 @@ body.nav-menu-open .whatsapp-fab {
 }
 
 @media (min-width: 980px) {
+  .nav {
+    --nav-side-width: clamp(12rem, 13.2vw, 16.75rem);
+  }
+
+  .nav__brand,
+  .nav__cta--desktop {
+    width: var(--nav-side-width);
+  }
+
+  .nav__cta--desktop {
+    justify-self: end;
+    text-align: center;
+  }
+
   .nav__links {
     display: flex;
   }
