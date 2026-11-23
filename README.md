@@ -31,7 +31,7 @@ The first command builds the site and starts Wrangler's local Workers runtime. T
 
 ### Build-time configuration
 
-- `VITE_GOOGLE_SCRIPT_URL` is the public Google Apps Script web-app endpoint used by the browser form. Vite embeds `VITE_` values in the public client bundle. Set it in the build environment; do not use it for private credentials.
+- `VITE_GOOGLE_SCRIPT_URL` is the public Google Apps Script web-app endpoint used by the browser form. Vite embeds `VITE_` values in the public client bundle via committed `.env.production` (safe: this URL is public). Local overrides stay in ignored `.env`.
 - Resend credentials and email settings remain in Google Apps Script **Script Properties** (`RESEND_API_KEY`, and optional `RESEND_FROM_EMAIL`, `LEAD_NOTIFICATION_EMAIL`, `SITE_URL`). They are not Cloudflare Worker secrets because the Worker does not send email or write to Sheets.
 - Form submissions from a preview will reach whichever Apps Script URL was included at build time. Use a test Apps Script deployment and test sheet for end-to-end submissions; the production endpoint writes a lead and can send a real email.
 

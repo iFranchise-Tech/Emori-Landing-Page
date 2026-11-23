@@ -3,6 +3,10 @@ import { getMarketingAttributionFields } from './marketingAttribution'
 
 const SUBMIT_TIMEOUT_MS = 45_000
 
+/** Public Web App URL — safe fallback when build env omits VITE_GOOGLE_SCRIPT_URL. */
+const DEFAULT_GOOGLE_SCRIPT_URL =
+  'https://script.google.com/macros/s/AKfycbxZLLkfPH9nRxKiBjwqhtwOjq3Rw8qddmk6zvexcWtbzF9UIjtlRjiYjVrlAIQH0v_s6w/exec'
+
 export type SubmissionErrorKind = 'config' | 'network' | 'timeout' | 'server'
 
 export class SubmissionError extends Error {
@@ -17,7 +21,7 @@ export class SubmissionError extends Error {
 
 export function getGoogleScriptUrl() {
   const url = import.meta.env.VITE_GOOGLE_SCRIPT_URL as string | undefined
-  return url?.trim() || ''
+  return url?.trim() || DEFAULT_GOOGLE_SCRIPT_URL
 }
 
 export function isFormConfigured() {
