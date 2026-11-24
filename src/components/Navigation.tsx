@@ -166,7 +166,7 @@ export function Navigation({ variant = 'default' }: NavigationProps) {
             className="nav__cta nav__cta--book nav__mobile-cta"
             onClick={(event) => goToSection(event, 'contact')}
           >
-            Request Consultation
+            Request a Consultation
           </a>
         </div>
       </nav>
@@ -175,7 +175,7 @@ export function Navigation({ variant = 'default' }: NavigationProps) {
         className="nav__cta nav__cta--book nav__cta--desktop"
         onClick={(event) => goToSection(event, 'contact')}
       >
-        Request Consultation
+        Request a Consultation
       </a>
     </motion.header>
   )
