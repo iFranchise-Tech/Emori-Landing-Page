@@ -15,9 +15,19 @@ export class SubmissionError extends Error {
   }
 }
 
+const SCRIPT_URL_PATTERN = /^https:\/\/script\.google\.com\/macros\/s\/[^/?#]+\/exec\/?$/
+
+/**
+ * Public Web App URL. Placeholder values from `.env.example` are treated as unset
+ * so the form does not post to a deployment that does not exist yet.
+ */
 export function getGoogleScriptUrl() {
-  const url = import.meta.env.VITE_GOOGLE_SCRIPT_URL as string | undefined
-  return url?.trim() || ''
+  const url = (import.meta.env.VITE_GOOGLE_SCRIPT_URL as string | undefined)?.trim() || ''
+  if (!url || url.includes('YOUR_DEPLOYMENT_ID') || url.includes('YOUR_TEST_DEPLOYMENT_ID')) {
+    return ''
+  }
+  if (!SCRIPT_URL_PATTERN.test(url)) return ''
+  return url.replace(/\/$/, '')
 }
 
 export function isFormConfigured() {

@@ -35,6 +35,16 @@ The first command builds the site and starts Wrangler's local Workers runtime. T
 - `VITE_PREVIEW_GOOGLE_SCRIPT_URL` is optional and should point only to a test Apps Script deployment and test sheet. Leave it unset to keep preview submissions disabled.
 - Resend credentials and email settings remain in Google Apps Script **Script Properties** (`RESEND_API_KEY`, and optional `RESEND_FROM_EMAIL`, `LEAD_NOTIFICATION_EMAIL`, `SITE_URL`). They are not Cloudflare Worker secrets because the Worker does not send email or write to Sheets.
 
+## Lead form
+
+Franchise applications are posted to the Apps Script Web App, which validates the lead, appends the **Leads** sheet, and emails Resend. Deployment, Script Properties, duplicate handling, and the CORS constraint are documented in [google-apps-script/README.md](google-apps-script/README.md).
+
+Until you paste a real `/exec` URL, keep this placeholder in local `.env`. The form treats it as not configured:
+
+```text
+https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec
+```
+
 ### Production deployment
 
 Deploy the production Worker with `wrangler deploy` and attach `emori.ifranchise.in` under the Worker’s **Settings → Domains & Routes → Add → Custom Domain**. Keep the existing Vercel DNS target available as a rollback path until production validation is complete.

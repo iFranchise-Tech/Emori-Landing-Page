@@ -418,7 +418,7 @@ img {
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 1rem;
-  padding: 0.5rem clamp(1.25rem, 4vw, 2.75rem);
+  padding: 0.5rem max(1rem, calc((100% - 1180px) / 2));
   backdrop-filter: blur(0px);
   transition: backdrop-filter 0.6s var(--ease-luxury);
 }
@@ -572,18 +572,9 @@ body.nav-menu-open .whatsapp-fab {
 }
 
 @media (min-width: 980px) {
-  .nav {
-    --nav-side-width: clamp(12rem, 13.2vw, 16.75rem);
-  }
-
-  .nav__brand,
-  .nav__cta--desktop {
-    width: var(--nav-side-width);
-  }
-
   .nav__cta--desktop {
     justify-self: end;
-    text-align: center;
+    width: auto;
   }
 
   .nav__links {
@@ -12524,6 +12515,10 @@ html.modal-open .experience {
 }
 
 @media (max-width: 1023px) {
+  .nav {
+    padding-inline: max(0.75rem, calc((100% - 1080px) / 2));
+  }
+
   .fico__scene,
   .performance__rail,
   .invest__scene,

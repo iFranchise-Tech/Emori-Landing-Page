@@ -4,16 +4,26 @@
  * Setup:
  * 1. Create a new Google Sheet.
  * 2. Extensions → Apps Script → paste this file → Save.
- * 3. Run `setupSheet` once (authorize when prompted) — creates **Leads** tab.
+ * 3. Run `setupSheet` once (authorize when prompted). It updates headers on the
+ *    existing **Leads** tab, including Submission ID, and does not change
+ *    Sheet1, Config, or any existing lead rows.
  * 4. Project Settings (gear icon) → Script Properties → Add script property:
  *      RESEND_API_KEY = re_…
  *    Optional overrides: RESEND_FROM_EMAIL, LEAD_NOTIFICATION_EMAIL, SITE_URL.
  * 5. Run `testLeadEmail` once to verify email delivery.
- * 6. Deploy → Manage deployments → Edit → New version → Deploy (same URL).
+ * 6. Deploy → New deployment → Web app.
+ *      Execute as: Me
+ *      Who has access: Anyone
+ *    Copy the /exec URL. Full steps: google-apps-script/README.md
+ * 7. After later edits: Deploy → Manage deployments → Edit → New version
+ *    (same URL). The live site keeps serving the previous version until you do this.
  *
  * Secrets live only in Script Properties — never in this file, the sheet, or the website .env.
+ * Do not prefix Resend settings with VITE_. The browser cannot read them.
  */
 
+// Canonical tab in the bound spreadsheet "Emori Landing Page Leads".
+// Sheet1 and Config are never read, written, renamed, or deleted.
 var SHEET_NAME = 'Leads'
 var TIMEZONE = 'Asia/Kolkata'
 
@@ -31,6 +41,7 @@ var HEADERS = [
   'Source',
   'UTM Parameters',
   'Email Status',
+  'Submission ID',
 ]
 
 /** Non-secret defaults, overridable via Script Properties. */
@@ -40,43 +51,121 @@ var EMAIL_DEFAULTS = {
   SITE_URL: '',
 }
 
-function getLeadsSheet() {
+function getBoundSpreadsheet() {
   var spreadsheet = SpreadsheetApp.getActiveSpreadsheet()
+  if (!spreadsheet) {
+    throw new Error(
+      'Bind this script to the leads spreadsheet (open Emori Landing Page Leads → Extensions → Apps Script). A standalone script cannot see the Leads tab.',
+    )
+  }
+  return spreadsheet
+}
+
+function getLeadsSheet() {
+  var spreadsheet = getBoundSpreadsheet()
+  // Name lookup only. Never getActiveSheet(): that would follow whichever tab
+  // is open and could write to Sheet1.
   var sheet = spreadsheet.getSheetByName(SHEET_NAME)
   if (!sheet) {
     sheet = spreadsheet.insertSheet(SHEET_NAME)
   }
+  assertLeadsSheet(sheet)
   return sheet
 }
 
-function setupSheet() {
-  var sheet = getLeadsSheet()
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(HEADERS)
-    sheet.getRange(1, 1, 1, HEADERS.length).setFontWeight('bold')
-    sheet.setFrozenRows(1)
-    return
+function assertLeadsSheet(sheet) {
+  if (!sheet || sheet.getName() !== SHEET_NAME) {
+    throw new Error('Refusing to read or write leads outside the Leads tab.')
   }
-
-  ensureLeadHeaders(sheet)
 }
 
-function ensureLeadHeaders(sheet) {
-  var lastColumn = Math.max(sheet.getLastColumn(), 1)
+function setupSheet() {
+  var spreadsheet = getBoundSpreadsheet()
+  var sheet = getLeadsSheet()
+  var before = getHeaderMap(sheet)
+  var headerMap = ensureLeadHeaders(sheet)
+  var added = []
+
+  HEADERS.forEach(function (header) {
+    if (!headerColumn(before, header) && headerColumn(headerMap, header)) added.push(header)
+  })
+
+  var preserved = Math.max(sheet.getLastRow() - 1, 0)
+  var untouched = spreadsheet
+    .getSheets()
+    .map(function (item) {
+      return item.getName()
+    })
+    .filter(function (name) {
+      return name !== SHEET_NAME
+    })
+
+  var summary = [
+    'Spreadsheet: ' + spreadsheet.getName(),
+    'Updated tab: ' + sheet.getName(),
+    'Existing lead rows preserved: ' + preserved,
+    'Headers added: ' + (added.length ? added.join(', ') : '(none)'),
+    'Tabs not modified: ' + (untouched.length ? untouched.join(', ') : '(none)'),
+  ].join('\n')
+
+  Logger.log(summary)
+
+  try {
+    SpreadsheetApp.getUi().alert(summary)
+  } catch (error) {
+    Logger.log('UI alert unavailable: ' + error)
+  }
+}
+
+function getHeaderMap(sheet) {
+  var lastColumn = sheet.getLastColumn()
+  if (lastColumn < 1) return {}
+
   var headerRow = sheet.getRange(1, 1, 1, lastColumn).getValues()[0]
   var headerMap = {}
 
   headerRow.forEach(function (header, index) {
-    headerMap[String(header || '').trim()] = index + 1
+    var name = String(header || '').trim()
+    if (name && !headerMap[name]) headerMap[name] = index + 1
   })
 
-  HEADERS.forEach(function (header) {
-    if (!headerMap[header]) {
-      var nextColumn = sheet.getLastColumn() + 1
-      sheet.getRange(1, nextColumn).setValue(header).setFontWeight('bold')
-      headerMap[header] = nextColumn
-    }
+  return headerMap
+}
+
+function headerColumn(headerMap, header) {
+  if (!headerMap) return 0
+  if (headerMap[header]) return headerMap[header]
+
+  var target = String(header || '').toLowerCase()
+  var match = 0
+  Object.keys(headerMap).forEach(function (name) {
+    if (!match && String(name).toLowerCase() === target) match = headerMap[name]
   })
+  return match
+}
+
+function ensureLeadHeaders(sheet) {
+  assertLeadsSheet(sheet)
+
+  // A completely empty Leads tab gets the header row once. A tab that already
+  // has a header row or lead records is never cleared, rewritten, or deleted.
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(HEADERS)
+    sheet.getRange(1, 1, 1, HEADERS.length).setFontWeight('bold')
+    sheet.setFrozenRows(1)
+    return getHeaderMap(sheet)
+  }
+
+  var headerMap = getHeaderMap(sheet)
+
+  HEADERS.forEach(function (header) {
+    if (headerColumn(headerMap, header)) return
+    var nextColumn = Math.max(sheet.getLastColumn(), 0) + 1
+    sheet.getRange(1, nextColumn).setValue(header).setFontWeight('bold')
+    headerMap[header] = nextColumn
+  })
+
+  return headerMap
 }
 
 function getEmailSettings() {
@@ -184,67 +273,246 @@ function doGet(e) {
   )
 }
 
+var PHONE_RULES = {
+  IN: { code: '91', pattern: /^[6-9]\d{9}$/ },
+  US: { code: '1', pattern: /^\d{10}$/ },
+  AE: { code: '971', pattern: /^\d{9}$/ },
+  GB: { code: '44', pattern: /^\d{10}$/ },
+  SG: { code: '65', pattern: /^\d{8}$/ },
+  AU: { code: '61', pattern: /^\d{9}$/ },
+  CA: { code: '1', pattern: /^\d{10}$/ },
+}
+
 function doPost(e) {
   try {
-    var submissionId = String(((e && e.parameter) || {}).submission_id || '').trim()
-    var cache = CacheService.getScriptCache()
-    var cacheKey = submissionId ? 'submission:' + submissionId.slice(0, 200) : ''
-    if (cacheKey && cache.get(cacheKey)) {
-      return jsonResponse({ success: true, message: 'Application already received', duplicate: true })
+    if (!e) {
+      return jsonResponse({ success: false, error: 'Invalid submission.' })
     }
 
-    var sheet = getLeadsSheet()
-    setupSheet()
+    // Direct posts that fill the hidden autofill trap are dropped. The website
+    // strips this field before sending, so a real browser submission is unaffected.
+    if (isHoneypot(e)) {
+      return jsonResponse({ success: true, message: 'Application received' })
+    }
 
-    var data = readPayload(e)
+    var parsed
+    try {
+      parsed = readPayload(e)
+    } catch (parseError) {
+      Logger.log('Invalid lead payload: ' + parseError)
+      return jsonResponse({ success: false, error: 'Invalid submission.' })
+    }
+
+    if (parsed.error) {
+      Logger.log('Rejected lead: ' + parsed.error)
+      return jsonResponse({ success: false, error: parsed.error })
+    }
+
+    var data = parsed.data
+    var lock = LockService.getScriptLock()
+    var locked = false
+
+    try {
+      lock.waitLock(20000)
+      locked = true
+    } catch (lockError) {
+      Logger.log('Could not lock leads sheet: ' + lockError)
+      return jsonResponse({ success: false, error: 'Server is busy. Please try again.' })
+    }
+
+    var sheet
+    var rowNumber
+
+    try {
+      sheet = getLeadsSheet()
+      ensureLeadHeaders(sheet)
+
+      if (isDuplicateSubmission(sheet, data.submissionId)) {
+        return jsonResponse({
+          success: true,
+          message: 'Application already received',
+          duplicate: true,
+        })
+      }
+
+      rowNumber = appendLeadRow(sheet, data, 'Pending')
+      rememberSubmission(data.submissionId)
+      SpreadsheetApp.flush()
+    } finally {
+      if (locked) {
+        try {
+          lock.releaseLock()
+        } catch (releaseError) {
+          Logger.log('Could not release lock: ' + releaseError)
+        }
+      }
+    }
+
+    // Save the row before emailing. A Resend failure must not drop the lead.
     var emailResult
     try {
       emailResult = sendLeadNotificationEmail(data)
     } catch (emailError) {
-      // Never lose the lead because the notification email failed.
-      emailResult = { ok: false, message: 'Failed: ' + String(emailError) }
+      Logger.log('Lead email failed: ' + emailError)
+      emailResult = { ok: false, message: 'Failed: email provider error' }
     }
 
-    sheet.appendRow([
-      data.submittedAt,
-      data.fullName,
-      data.countryIso,
-      data.countryCode,
-      data.phone,
-      data.email,
-      data.state,
-      data.city,
-      data.budget,
-      data.location,
-      data.source,
-      data.utmParameters,
-      emailResult.ok ? 'Sent' : emailResult.skipped ? '' : emailResult.message,
-    ])
-
-    if (cacheKey) cache.put(cacheKey, '1', 21600)
+    try {
+      setEmailStatus(sheet, rowNumber, emailStatusText(emailResult))
+    } catch (statusError) {
+      Logger.log('Could not update email status: ' + statusError)
+    }
 
     var redirectUrl = getSafeRedirectUrl(e)
     if (redirectUrl) {
       return redirectHtml(redirectUrl)
     }
 
+    // The website posts with no-cors and cannot read this body. Keep it free of
+    // provider errors and the API key. Email detail stays on the Leads sheet.
     return jsonResponse({
       success: true,
       message: 'Application received',
-      email: emailResult,
+      emailSent: emailResult.ok === true,
     })
   } catch (error) {
-    return jsonResponse({ success: false, error: String(error) })
+    Logger.log(error && error.stack ? error.stack : error)
+    return jsonResponse({ success: false, error: 'Unable to save the application.' })
   }
 }
 
-function getSafeRedirectUrl(e) {
+function isHoneypot(e) {
   var params = (e && e.parameter) || {}
-  var redirectUrl = String(params.redirect_url || '').trim()
-  if (!redirectUrl) return ''
-  if (redirectUrl.indexOf('/thank-you') === -1) return ''
-  if (!/^https?:\/\//i.test(redirectUrl)) return ''
-  return redirectUrl
+  if (String(params['fake-address'] || '').trim()) return true
+
+  if (!e || !e.postData || e.postData.type !== 'application/json' || !e.postData.contents) {
+    return false
+  }
+
+  try {
+    var json = JSON.parse(e.postData.contents)
+    return Boolean(json && String(json['fake-address'] || json.fakeAddress || '').trim())
+  } catch (error) {
+    return false
+  }
+}
+
+function submissionCacheKey(submissionId) {
+  return 'submission:' + submissionId
+}
+
+function rememberSubmission(submissionId) {
+  if (!submissionId) return
+  CacheService.getScriptCache().put(submissionCacheKey(submissionId), '1', 21600)
+}
+
+function isDuplicateSubmission(sheet, submissionId) {
+  if (!submissionId) return false
+  if (CacheService.getScriptCache().get(submissionCacheKey(submissionId))) return true
+  return findSubmissionRow(sheet, submissionId) > 0
+}
+
+function findSubmissionRow(sheet, submissionId) {
+  assertLeadsSheet(sheet)
+  var col = headerColumn(getHeaderMap(sheet), 'Submission ID')
+  if (!col) return 0
+
+  var last = sheet.getLastRow()
+  if (last < 2) return 0
+
+  var values = sheet.getRange(2, col, last - 1, 1).getValues()
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() === submissionId) return i + 2
+  }
+  return 0
+}
+
+function appendLeadRow(sheet, data, emailStatus) {
+  assertLeadsSheet(sheet)
+  var headerMap = ensureLeadHeaders(sheet)
+
+  HEADERS.forEach(function (header) {
+    if (!headerColumn(headerMap, header)) {
+      throw new Error('Missing Leads column: ' + header)
+    }
+  })
+
+  var width = Math.max(sheet.getLastColumn(), HEADERS.length)
+  var row = []
+  var values = {
+    'Submitted At': data.submittedAt,
+    'Full Name': data.fullName,
+    'Country ISO': data.countryIso,
+    'Country Code': data.countryCode,
+    Phone: data.phone,
+    Email: data.email,
+    State: data.state,
+    City: data.city,
+    'Investment Budget': data.budget,
+    'Preferred Location': data.location,
+    Source: data.source,
+    'UTM Parameters': data.utmParameters,
+    'Email Status': emailStatus,
+    'Submission ID': data.submissionId,
+  }
+
+  for (var i = 0; i < width; i++) row.push('')
+
+  Object.keys(values).forEach(function (header) {
+    var col = headerColumn(headerMap, header)
+    if (col) row[col - 1] = safeSheetValue(values[header])
+  })
+
+  sheet.appendRow(row)
+  return sheet.getLastRow()
+}
+
+function setEmailStatus(sheet, rowNumber, status) {
+  if (!rowNumber) return
+  assertLeadsSheet(sheet)
+  var col = headerColumn(getHeaderMap(sheet), 'Email Status')
+  if (!col) return
+  sheet.getRange(rowNumber, col).setValue(safeSheetValue(status))
+}
+
+function emailStatusText(emailResult) {
+  if (!emailResult) return 'Failed: email provider error'
+  if (emailResult.ok) return emailResult.message || 'Sent'
+  if (emailResult.skipped) return ''
+  return String(emailResult.message || 'Failed').slice(0, 500)
+}
+
+/** Sheets treats values that start with =, +, -, or @ as formulas. */
+function safeSheetValue(value) {
+  var text = String(value == null ? '' : value)
+  if (/^[=+\-@]/.test(text)) return "'" + text
+  return text
+}
+
+function getSafeRedirectUrl(e) {
+  var redirectUrl = String(((e && e.parameter) || {}).redirect_url || '').trim()
+  if (!redirectUrl || redirectUrl.indexOf('@') !== -1 || redirectUrl.indexOf('\\') !== -1) return ''
+
+  var match = redirectUrl.match(/^(https?):\/\/([^\/?#]+)(\/[^?#]*)?(\?[^#]*)?$/i)
+  if (!match) return ''
+
+  var protocol = match[1].toLowerCase()
+  var host = match[2]
+  var hostname = host.split(':')[0].toLowerCase()
+  var pathname = match[3] || '/'
+  var search = match[4] || ''
+  var isLocal = hostname === 'localhost' || hostname === '127.0.0.1'
+
+  if (protocol !== 'https' && !(protocol === 'http' && isLocal)) return ''
+  if (pathname !== '/thank-you' && pathname !== '/thank-you/') return ''
+
+  // Only redirect back to the configured public site. The website itself does not
+  // send redirect_url; this guards manual posts against an open redirect.
+  var siteMatch = String(getEmailSettings().siteUrl || '').match(/^https?:\/\/([^\/?#]+)/i)
+  if (!siteMatch) return ''
+  if (host.toLowerCase() !== siteMatch[1].toLowerCase() && !isLocal) return ''
+
+  return protocol + '://' + host + pathname + search
 }
 
 function redirectHtml(url) {
@@ -457,13 +725,19 @@ function formatLeadDate(value) {
 }
 
 function readPayload(e) {
-  if (e.postData && e.postData.type === 'application/json') {
-    var json = JSON.parse(e.postData.contents)
-    return normalizePayload(json)
+  if (e.postData && e.postData.contents && e.postData.type === 'application/json') {
+    var json
+    try {
+      json = JSON.parse(e.postData.contents)
+    } catch (error) {
+      throw new Error('Invalid JSON')
+    }
+    if (!json || typeof json !== 'object') throw new Error('Invalid JSON')
+    return buildLead(json)
   }
 
-  var p = e.parameter || {}
-  return normalizePayload({
+  var p = (e && e.parameter) || {}
+  return buildLead({
     submittedAt: p.submittedAt,
     fullName: p.applicant_full_name,
     countryIso: p.applicant_country_iso,
@@ -476,24 +750,90 @@ function readPayload(e) {
     location: p.applicant_location,
     source: p.applicant_source,
     utmParameters: p.applicant_utm_parameters,
+    submissionId: p.submission_id,
   })
 }
 
-function normalizePayload(raw) {
-  return {
+function buildLead(raw) {
+  raw = raw || {}
+
+  var data = {
     submittedAt: formatLeadDateTime(raw.submittedAt),
-    fullName: String(raw.fullName || ''),
-    countryIso: String(raw.countryIso || ''),
-    countryCode: String(raw.countryCode || ''),
-    phone: String(raw.phone || ''),
-    email: String(raw.email || ''),
-    state: String(raw.state || ''),
-    city: String(raw.city || ''),
-    budget: String(raw.budget || ''),
-    location: String(raw.location || ''),
-    source: String(raw.source || ''),
-    utmParameters: String(raw.utmParameters || ''),
+    fullName: cleanText(raw.fullName || raw.applicant_full_name),
+    countryIso: String(raw.countryIso || raw.applicant_country_iso || '')
+      .replace(/[^A-Za-z]/g, '')
+      .toUpperCase(),
+    countryCode: String(raw.countryCode || raw.applicant_country_code || '').replace(/\D/g, ''),
+    phone: String(raw.phone || raw.applicant_phone || '').replace(/\D/g, ''),
+    email: cleanText(raw.email || raw.applicant_email),
+    state: cleanText(raw.state || raw.applicant_state),
+    city: cleanText(raw.city || raw.applicant_city),
+    budget: cleanText(raw.budget || raw.applicant_budget),
+    location: cleanText(raw.location || raw.applicant_location),
+    source: cleanText(raw.source || raw.applicant_source).slice(0, 120),
+    utmParameters: cleanText(raw.utmParameters || raw.applicant_utm_parameters).slice(0, 500),
+    submissionId: normalizeSubmissionId(raw.submissionId || raw.submission_id),
   }
+
+  return { data: data, error: validateLead(data) }
+}
+
+function cleanText(value) {
+  return String(value == null ? '' : value)
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
+}
+
+function normalizeSubmissionId(value) {
+  var id = cleanText(value)
+  if (!/^[A-Za-z0-9-]{8,80}$/.test(id)) return ''
+  return id
+}
+
+function validateLead(data) {
+  var errors = []
+
+  if (!data.fullName) errors.push('Full name is required.')
+  else if (data.fullName.length > 120) errors.push('Full name is too long.')
+
+  if (!data.email) errors.push('Email is required.')
+  else if (data.email.length > 254 || !EMAIL_PATTERN.test(data.email)) errors.push('Email is not valid.')
+
+  if (data.countryIso && !/^[A-Z]{2}$/.test(data.countryIso)) errors.push('Country is not valid.')
+  if (data.countryCode && !/^\d{1,4}$/.test(data.countryCode)) errors.push('Country code is not valid.')
+
+  var phoneError = validatePhone(data)
+  if (phoneError) errors.push(phoneError)
+
+  if (!data.state) errors.push('State is required.')
+  else if (data.state.length > 80) errors.push('State is too long.')
+
+  if (!data.city) errors.push('City is required.')
+  else if (data.city.length > 80) errors.push('City is too long.')
+
+  if (!data.budget) errors.push('Investment budget is required.')
+  else if (data.budget.length > 80) errors.push('Investment budget is too long.')
+
+  if (!data.location) errors.push('Preferred location is required.')
+  else if (data.location.length > 80) errors.push('Preferred location is too long.')
+
+  return errors.join(' ')
+}
+
+function validatePhone(data) {
+  var rule = PHONE_RULES[data.countryIso]
+
+  if (rule) {
+    if (data.countryCode && data.countryCode !== rule.code) {
+      return 'Country code does not match the selected country.'
+    }
+    if (!rule.pattern.test(data.phone)) return 'Phone number is not valid.'
+    return ''
+  }
+
+  if (!/^\d{8,15}$/.test(data.phone)) return 'Phone number is not valid.'
+  return ''
 }
 
 function escapeHtml(value) {
